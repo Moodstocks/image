@@ -4,11 +4,12 @@ This sections includes functions for saving and loading different types
 of images to and from disk.
 
 <a name="image.load"></a>
-### [res] image.load([dst,] filename, [depth, [tensortype]]) ###
+### [res] image.load([dst,] filename, [depth, [tensortype, [noscale]]]) ###
 Loads an image located at path `filename` having `depth` channels (1 or 3)
 into a [Tensor](https://github.com/torch/torch7/blob/master/doc/tensor.md#tensor).
 You can either specify the type of the `res` tensor via `tensortype`
 (*float*, *double* or *byte*) or provide a `dst` tensor that will be resized to store the image.
+If `noscale` is specified, the range will not be rescaled between 0 and 1.
 
 The image format is determined from the `filename`'s
 extension suffix. Supported formats are
@@ -38,11 +39,12 @@ The `tensor` should be of size `nChannel x height x width`.
 To save with a minimal loss, the tensor values should lie in the range [0, 1] since the tensor is clamped between 0 and 1 before being saved to the disk.
 
 <a name="image.decompress"></a>
-### [res] image.decompress([dst,] tensor, [depth, [tensortype]]) ###
+### [res] image.decompress([dst,] tensor, [depth, [tensortype, [noscale]]]) ###
 Decompresses an image from a ByteTensor in memory having `depth` channels (1 or 3)
 into a [Tensor](https://github.com/torch/torch7/blob/master/doc/tensor.md#tensor)
 You can either specify the type of the `res` tensor via `tensortype`
 (*float*, *double* or *byte*) or provide a `dst` tensor that will be resized to store the image.
+If `noscale` is specified, the range will not be rescaled between 0 and 1.
 
 This function support both JPG and PNG inputs.
 

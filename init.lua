@@ -120,38 +120,50 @@ end
 
 local function parseLoadArg(...)
    local args = {...}
-   if #args == 4 then
-      error("You cannot specify both dst and tensortype")
-   end
-   local dst, filename, depth, tensortype
+   local dst, filename, depth, tensortype, noscale
    if torch.isTensor(args[1]) then
       dst = args[1]
       filename = args[2]
       depth = args[3]
+      tensortype = args[4]
+      noscale = args[5]
+      if not tensortype then
+         tensortype = tensor2type(dst)
+      else
+         assert(tensor2type(dst)==tensortype,
+          "If you specify both dst and tensortype, dst should be of type tensortype")
+      end
    else
       filename = args[1]
       depth = args[2]
       tensortype = args[3]
+      noscale = args[4]
    end
-   return dst, filename, depth, tensortype
+   return dst, filename, depth, tensortype, noscale
 end
 
 local function parseDecompressArg(...)
    local args = {...}
-   if #args == 4 then
-      error("You cannot specify both dst and tensortype")
-   end
-   local dst, tensor, depth, tensortype
+   local dst, tensor, depth, tensortype, noscale
    if torch.isTensor(args[2]) then
       dst = args[1]
       tensor = args[2]
       depth = args[3]
+      tensortype = args[4]
+      noscale = args[5]
+      if not tensortype then
+         tensortype = tensor2type(dst)
+      else
+         assert(tensor2type(dst)==tensortype,
+          "If you specify both dst and tensortype, dst should be of type tensortype")
+      end
    else
       tensor = args[1]
       depth = args[2]
       tensortype = args[3]
+      noscale = args[4]
    end
-   return dst, tensor, depth, tensortype
+   return dst, tensor, depth, tensortype, noscale
 end
 
 local function isPNG(magicTensor)
@@ -194,10 +206,10 @@ local function decompress(...)
 end
 rawset(image, 'decompress', decompress)
 
-local function processPNG(img, depth, bit_depth, tensortype)
+local function processPNG(img, depth, bit_depth, tensortype, noscale)
     local MAXVAL = 255
     if bit_depth == 16 then MAXVAL = 65535 end
-    if tensortype ~= 'byte' then
+    if (not noscale) and tensortype ~= 'byte' then
         img:mul(1/MAXVAL)
     end
     img = todepth(img, depth)
@@ -208,12 +220,11 @@ local function loadPNG(...)
    if not xlua.require 'libpng' then
       dok.error('libpng package not found, please install libpng','image.loadPNG')
    end
-   local dst, filename, depth, tensortype = parseLoadArg(...)
+   local dst, filename, depth, tensortype, noscale = parseLoadArg(...)
    local img = torch.isTensor(dst) and dst or template(tensortype)
-   tensortype = tensor2type(img)
    local load_from_file = 1
    local bit_depth = img.libpng.load(load_from_file, filename, img)
-   img = processPNG(img, depth, bit_depth, tensortype)
+   img = processPNG(img, depth, bit_depth, tensortype, noscale)
    if dst and img:cdata() ~= dst:cdata() then
       dst:resizeAs(img):copy(img)
       return dst
@@ -246,16 +257,15 @@ local function decompressPNG(...)
       dok.error('libpng package not found, please install libpng',
                   'image.decompressPNG')
    end
-   local dst, tensor, depth, tensortype = parseDecompressArg(...)
+   local dst, tensor, depth, tensortype, noscale = parseDecompressArg(...)
    if torch.typename(tensor) ~= 'torch.ByteTensor' then
       dok.error('Input tensor (with compressed png) must be a byte tensor',
                   'image.decompressPNG')
    end
    local img = torch.isTensor(dst) and dst or template(tensortype)
-   local tensortype = tensor2type(img)
    local load_from_file = 0
    local bit_depth = img.libpng.load(load_from_file, tensor, img)
-   img = processPNG(img, depth, bit_depth, tensortype)
+   img = processPNG(img, depth, bit_depth, tensortype, noscale)
    if dst and img:cdata() ~= dst:cdata() then
       dst:resizeAs(img):copy(img)
       return dst
@@ -271,9 +281,9 @@ function image.getPNGsize(filename)
    return torch.Tensor().libpng.size(filename)
 end
 
-local function processJPG(img, depth, tensortype)
+local function processJPG(img, depth, tensortype, noscale)
    local MAXVAL = 255
-   if tensortype ~= 'byte' then
+   if (not noscale) and tensortype ~= 'byte' then
       img:mul(1/MAXVAL)
    end
    img = todepth(img, depth)
@@ -284,12 +294,11 @@ local function loadJPG(...)
    if not xlua.require 'libjpeg' then
       dok.error('libjpeg package not found, please install libjpeg','image.loadJPG')
    end
-   local dst, filename, depth, tensortype = parseLoadArg(...)
+   local dst, filename, depth, tensortype, noscale = parseLoadArg(...)
    local img = torch.isTensor(dst) and dst or template(tensortype)
-   tensortype = tensor2type(img)
    local load_from_file = 1
    img.libjpeg.load(load_from_file, filename, img)
-   img = processJPG(img, depth, tensortype)
+   img = processJPG(img, depth, tensortype, noscale)
    if dst and img:cdata() ~= dst:cdata() then
       dst:resizeAs(img):copy(img)
       return dst
@@ -303,16 +312,15 @@ local function decompressJPG(...)
       dok.error('libjpeg package not found, please install libjpeg',
         'image.decompressJPG')
    end
-   local dst, tensor, depth, tensortype = parseDecompressArg(...)
+   local dst, tensor, depth, tensortype, noscale = parseDecompressArg(...)
    if torch.typename(tensor) ~= 'torch.ByteTensor' then
       dok.error('Input tensor (with compressed jpeg) must be a byte tensor',
         'image.decompressJPG')
    end
    local img = torch.isTensor(dst) and dst or template(tensortype)
-   tensortype = tensor2type(img)
    local load_from_file = 0
    img.libjpeg.load(load_from_file, tensor, img)
-   img = processJPG(img, depth, tensortype)
+   img = processJPG(img, depth, tensortype, noscale)
    if dst and img:cdata() ~= dst:cdata() then
       dst:resizeAs(img):copy(img)
       return dst
@@ -356,11 +364,10 @@ rawset(image, 'compressJPG', compressJPG)
 local function loadPPM(...)
    require 'libppm'
    local MAXVAL = 255
-   local dst, filename, depth, tensortype = parseLoadArg(...)
+   local dst, filename, depth, tensortype, noscale = parseLoadArg(...)
    local img = torch.isTensor(dst) and dst or template(tensortype)
-   tensortype = tensor2type(img)
    img.libppm.load(filename, img)
-   if tensortype ~= 'byte' then
+   if (not noscale) and tensortype ~= 'byte' then
       img:mul(1/MAXVAL)
    end
    img = todepth(img, depth)
@@ -421,7 +428,8 @@ local function load(...)
                        {type='tensor', help='tensor used to store the image'},
                        {type='string', help='path to file', req=true},
                        {type='number', help='force destination depth: 1 | 3'},
-                       {type='string', help='type: byte | float | double'}))
+                       {type='string', help='type: byte | float | double'},
+                       {type='bool', help="don't scale the pixel values (default true for byte type)"}))
       dok.error('missing file name', 'image.load')
    end
 
