@@ -5,6 +5,8 @@
 static int libppm_(Main_load)(lua_State *L)
 {
   const char *filename = luaL_checkstring(L, 1);
+  THTensor *tensor = luaT_checkudata(L, 2, torch_Tensor);
+
   FILE* fp = fopen ( filename, "r" );
   if ( !fp ) {
     luaL_error(L, "cannot open file <%s> for reading", filename);
@@ -84,7 +86,7 @@ static int libppm_(Main_load)(lua_State *L)
   }
 
   // export tensor
-  THTensor *tensor = THTensor_(newWithSize3d)(C,H,W);
+  THTensor_(resize3d)(tensor, C, H, W);
   real *data = THTensor_(data)(tensor);
   long i,k,j=0;
   int val;
@@ -104,9 +106,7 @@ static int libppm_(Main_load)(lua_State *L)
   free(r);
   fclose(fp);
 
-  // return loaded image
-  luaT_pushudata(L, tensor, torch_Tensor);
-  return 1;
+  return 0;
 }
 
 int libppm_(Main_save)(lua_State *L) {

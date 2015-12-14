@@ -28,6 +28,7 @@ static int libpng_(Main_load)(lua_State *L)
   libpng_errmsg errmsg;
 
   const int load_from_file = luaL_checkint(L, 1);
+  THTensor *tensor = luaT_checkudata(L, 3, torch_Tensor);
 
   if (load_from_file == 1){
     const char *file_name = luaL_checkstring(L, 2);
@@ -129,7 +130,7 @@ static int libpng_(Main_load)(lua_State *L)
   }
 
   /* alloc tensor */
-  THTensor *tensor = THTensor_(newWithSize3d)(depth, height, width);
+  THTensor_(resize3d)(tensor, depth, height, width);
   real *tensor_data = THTensor_(data)(tensor);
 
   /* alloc data in lib format */
@@ -187,15 +188,13 @@ static int libpng_(Main_load)(lua_State *L)
     fclose(fp);
   }
 
-  /* return tensor */
-  luaT_pushudata(L, tensor, torch_Tensor);
-
+  /* return bit_depth */
   if (bit_depth < 8) {
     bit_depth = 8;
   }
   lua_pushnumber(L, bit_depth);
 
-  return 2;
+  return 1;
 }
 
 static int libpng_(Main_save)(lua_State *L)

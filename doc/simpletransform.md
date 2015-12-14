@@ -50,14 +50,14 @@ type of interpolation to be used. Valid values include
 (the default), [bicubic](https://en.wikipedia.org/wiki/Bicubic_interpolation),
 or *simple* interpolation. Returns a new `res` Tensor.
 
-### [res] image.scale(src, size, [mode]) ###
+### [res] image.scale([dst,] src, size, [mode]) ###
 Rescale the height and width of image `src`.  Variable `size` is a number
 or a string specifying the size of the result image. When `size` is a
 number, it specifies the maximum height or width of the output. When it is
 a string like `WxH` or `MAX` or `^MIN`, `*SC` or `*SCn/SCd` it specifies
 the `height x width`, maximum height or width of the output, minimum height
 or width of the output, scaling factor (number), or fractional scaling
-factor (int/int), respectively.
+factor (int/int), respectively. If `dst` is provided, it will be resized and used to store the result.
 
 ### [res] image.scale(dst, src, [mode]) ###
 Rescale the height and width of image `src` to fit the dimensions of 
