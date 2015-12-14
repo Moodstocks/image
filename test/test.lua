@@ -16,6 +16,13 @@ end
 
 local unpack = unpack and unpack or table.unpack -- lua52 compatibility
 
+-- Handle both cases where
+-- loading a grayscale image will create a 3D Tensor with one channel
+-- loading an image not grayscale forced to be grayscale will create a 2D tensor
+local function isgrayscale(img)
+  return img:dim()==2 or (img:dim()==3 and img:size(1)==1)
+end
+
 ----------------------------------------------------------------------
 -- Flip test
 --
@@ -217,8 +224,26 @@ function test.bilinearUpscale_ByteTensor()
   assertByteTensorEq(actual, expected)
 end
 
+
+function test.bilinearUpscaleInplace()
+  local im = outerProduct{1, 2, 4, 2}:double()
+  local output_buffer = torch.FloatTensor()
+  local ok, actual = pcall(image.scale, output_buffer, im, '7', 'bilinear')
+  tester:assert(not ok, "Wrongly scaling a doubleTensor into a floatTensor.")
+end
+
+
+function test.bilinearUpscaleWrongType()
+  local im = outerProduct{1, 2, 4, 2}
+  local expected = outerProduct{1, 1.5, 2, 3, 4, 3, 2}
+  local output_buffer = torch.Tensor()
+  local actual = image.scale(output_buffer, im, '7', 'bilinear')
+  tester:asserteq(actual:data(), output_buffer:data())
+  tester:assertTensorEq(actual, expected, 1e-5)
+end
+
 ----------------------------------------------------------------------
--- Scale test
+-- Flip test
 --
 local flip_tests = {}
 function flip_tests.test_transformation_largeByteImage(flip)
@@ -342,6 +367,39 @@ function test.LoadInvalid()
   
   tester:assert(not ok or img_from_tensor == nil,
     'A non-nil was returned on an invalid input! ')
+end
+
+function test.test_inplacedecompress()
+  local types = {
+    float = 'torch.FloatTensor',
+    double = 'torch.DoubleTensor',
+    byte = 'torch.ByteTensor'
+  }
+  local image_path = getTestImagePath('lena.jpg')
+  -- Load the raw binary from the source file into a ByteTensor
+  local fin = torch.DiskFile(image_path, 'r')
+  fin:binary()
+  fin:seekEnd()
+  local file_size_bytes = fin:position() - 1
+  fin:seek(1)
+  local img_binary = torch.ByteTensor(file_size_bytes)
+  fin:readByte(img_binary:storage())
+  fin:close()
+
+  for tensortype, typename in pairs(types) do
+    local buffer = image.decompress(img_binary, 3, tensortype)
+    tester:asserteq(torch.type(buffer), typename, 'decompressing an image '..
+      'with type '..tensortype..' did not created a '..typename..' but a '..
+      torch.type(buffer))
+
+    local buffer2 = image.decompress(buffer, img_binary, 3)
+    tester:asserteq(buffer:data(), buffer2:data(), 'Failed to decompress an image in existing buffer')
+  end
+
+  -- Make sure we cannot provide tensor type different from the one of dst
+  local dst = torch.FloatTensor()
+  local ok, res = pcall(image.decompress, dst, img_binary, 3, 'double')
+  assert(not ok, 'Should not be able to specify different dst and tensortype')
 end
 
 ----------------------------------------------------------------------
@@ -518,6 +576,62 @@ function test.test_pbmload()
    local ok, msg = pcall(image.loadPPM, getTestImagePath("P4.pbm"))
    tester:assert(not ok, "PBM format should not be loaded")
    tester:assert(string.match(msg, "unsupported magic number"))
+ end
+
+
+----------------------------------------------------------------------
+-- Loading test
+--
+
+function test.test_inplaceload()
+  local types = {
+    float = 'torch.FloatTensor',
+    double = 'torch.DoubleTensor',
+    byte = 'torch.ByteTensor'
+  }
+  local image_path_jpg = getTestImagePath('lena.jpg')
+  local image_path_png = getTestImagePath('lena.png')
+  local image_path_ppm = getTestImagePath('P6.ppm')
+  for _, image_path in pairs{image_path_jpg, image_path_png, image_path_ppm} do
+    for tensortype, typename in pairs(types) do
+      local buffer = image.load(image_path, 3, tensortype)
+      tester:asserteq(torch.type(buffer), typename, 'Loading an image with '..
+        'type '..tensortype..' did not created a '..typename..' but a '..
+        torch.type(buffer))
+
+      local buffer2 = image.load(buffer, image_path, 3)
+      tester:asserteq(buffer:data(), buffer2:data(), 'Failed to load an image in existing buffer')
+
+      buffer2 = image.load(buffer, image_path, 1)
+      tester:asserteq(buffer:data(), buffer2:data(), 'Failed to load an image in existing buffer when constraining a different depth')
+    end
+  end
+
+  -- Make sure we cannot provide tensor type different from the one of dst
+  -- Test specifically the JPG, PNG and PPM implementation since the image.load
+  -- would polute the stdout before raising an error
+  local dst = torch.FloatTensor()
+  local ok, res = pcall(image.loadJPG, dst, image_path_jpg, 3, 'double')
+  assert(not ok, 'Should not be able to specify different dst and tensortype')
+  local ok, res = pcall(image.loadPNG, dst, image_path_png, 3, 'double')
+  assert(not ok, 'Should not be able to specify different dst and tensortype')
+  local ok, res = pcall(image.loadPPM, dst, image_path_ppm, 3, 'double')
+  assert(not ok, 'Should not be able to specify different dst and tensortype')
+end
+
+function test.test_depthload()
+  local image_path = getTestImagePath('lena.jpg')
+  local grayscale_image_path = getTestImagePath('gray3x1.png')
+  local img = image.load(image_path)
+  -- Test loading a RGB image in grayscale
+  tester:asserteq(img:size(1), 3, "The original lena image should be RGB")
+  img = image.load(image_path, 1)
+  tester:assert(isgrayscale(img) , "Error trying to force the number of channels to 1")
+  -- Test loading a grayscale image in RGB
+  img = image.load(grayscale_image_path, 1)
+  tester:assert(isgrayscale(img), "Error gray3x1.png should be a grayscale image")
+  img = image.load(grayscale_image_path, 3)
+  tester:asserteq(img:size(1), 3, "Error trying to force the number of channels to 3")
 end
 
 

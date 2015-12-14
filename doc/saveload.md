@@ -1,37 +1,39 @@
 <a name="image.saveload"></a>
 ## Saving and Loading ##
-This sections includes functions for saving and loading different types 
+This sections includes functions for saving and loading different types
 of images to and from disk.
 
 <a name="image.load"></a>
-### [res] image.load(filename, [depth, tensortype]) ###
+### [res] image.load([dst,] filename, [depth, [tensortype]]) ###
 Loads an image located at path `filename` having `depth` channels (1 or 3)
-into a [Tensor](https://github.com/torch/torch7/blob/master/doc/tensor.md#tensor)
-of type `tensortype` (*float*, *double* or *byte*). The last two arguments 
-are optional.
+into a [Tensor](https://github.com/torch/torch7/blob/master/doc/tensor.md#tensor).
+You can either specify the type of the `res` tensor via `tensortype`
+(*float*, *double* or *byte*) or provide a `dst` tensor that will be resized to store the image.
 
-The image format is determined from the `filename`'s 
-extension suffix. Supported formats are 
-[JPEG](https://en.wikipedia.org/wiki/JPEG), 
-[PNG](https://en.wikipedia.org/wiki/Portable_Network_Graphics), 
+The image format is determined from the `filename`'s
+extension suffix. Supported formats are
+[JPEG](https://en.wikipedia.org/wiki/JPEG),
+[PNG](https://en.wikipedia.org/wiki/Portable_Network_Graphics),
 [PPM and PGM](https://en.wikipedia.org/wiki/Netpbm_format).
- 
-The returned `res` Tensor has size `nChannel x height x width` where `nChannel` is 
-1 (greyscale) or 3 (usually [RGB](https://en.wikipedia.org/wiki/RGB_color_model) 
+
+The returned `res` Tensor has size `nChannel x height x width` where `nChannel` is
+1 (greyscale) or 3 (usually [RGB](https://en.wikipedia.org/wiki/RGB_color_model)
 or [YUV](https://en.wikipedia.org/wiki/YUV).
 
 <a name="image.save"></a>
 ### image.save(filename, tensor) ###
-Saves Tensor `tensor` to disk at path `filename`. The format to which 
+Saves Tensor `tensor` to disk at path `filename`. The format to which
 the image is saved is extrapolated from the `filename`'s extension suffix.
 The `tensor` should be of size `nChannel x height x width`.
 
-<a name="image.decompressJPG"></a>
-### [res] image.decompressJPG(tensor, [depth, tensortype]) ###
+<a name="image.decompress"></a>
+### [res] image.decompress([dst,] tensor, [depth, [tensortype]]) ###
 Decompresses an image from a ByteTensor in memory having `depth` channels (1 or 3)
 into a [Tensor](https://github.com/torch/torch7/blob/master/doc/tensor.md#tensor)
-of type `tensortype` (*float*, *double* or *byte*). The last two arguments
-are optional.
+You can either specify the type of the `res` tensor via `tensortype`
+(*float*, *double* or *byte*) or provide a `dst` tensor that will be resized to store the image.
+
+This function support both JPG and PNG inputs.
 
 Usage:
 ```lua
@@ -44,7 +46,7 @@ local img_binary = torch.ByteTensor(file_size_bytes)
 fin:readByte(img_binary:storage())
 fin:close()
 -- Then when you're ready to decompress the ByteTensor:
-im = image.decompressJPG(img_binary)
+im = image.decompress(img_binary)
 ```
 
 <a name="image.compressJPG"></a>

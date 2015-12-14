@@ -206,7 +206,7 @@ static int libjpeg_(Main_load)(lua_State *L)
   /* int row_stride;		/1* physical row width in output buffer *1/ */
   int i, k;
 
-  THTensor *tensor = NULL;
+  THTensor *tensor = luaT_checkudata(L, 3, torch_Tensor);
   const int load_from_file = luaL_checkint(L, 1);
 
   if (load_from_file == 1) {
@@ -290,7 +290,7 @@ static int libjpeg_(Main_load)(lua_State *L)
   const unsigned int chans = cinfo.output_components;
   const unsigned int height = cinfo.output_height;
   const unsigned int width = cinfo.output_width;
-  tensor = THTensor_(newWithSize3d)(chans, height, width);
+  THTensor_(resize3d)(tensor, chans, height, width);
   real *tdata = THTensor_(data)(tensor);
   buffer = (*cinfo.mem->alloc_sarray)
     ((j_common_ptr) &cinfo, JPOOL_IMAGE, chans * width, 1);
@@ -360,8 +360,7 @@ static int libjpeg_(Main_load)(lua_State *L)
    */
 
   /* And we're done! */
-  luaT_pushudata(L, tensor, torch_Tensor);
-  return 1;
+  return 0;
 }
 
 /*

@@ -50,9 +50,22 @@ local type2tensor = {
 }
 local template = function(type)
    if type then
+      assert(type2tensor[type], 'Provided type '..type..' is not supported.')
       return type2tensor[type]
    else
       return torch.Tensor()
+   end
+end
+local tensor2type = function(tensor)
+   local typename = torch.type(tensor)
+   if typename == 'torch.DoubleTensor' then
+      return 'double'
+   elseif typename == 'torch.ByteTensor' then
+      return 'byte'
+   elseif typename == 'torch.FloatTensor' then
+      return 'float'
+   else
+      error(typename .. ' is not a supported tensor type.')
    end
 end
 
@@ -66,7 +79,7 @@ local function todepth(img, depth)
       if img:nDimension() == 2 then
          -- all good
       elseif img:size(1) == 3 or img:size(1) == 4 then
-	 img = image.rgb2y(img:narrow(1,1,3))[1]
+         img = image.rgb2y(img:narrow(1,1,3))[1]
       elseif img:size(1) == 2 then
          img = img:narrow(1,1,1)
       elseif img:size(1) ~= 1 then
@@ -97,6 +110,42 @@ local function todepth(img, depth)
    return img
 end
 
+local function parseLoadArg(...)
+   local args = {...}
+   if #args == 4 then
+      error("You cannot specify both dst and tensortype")
+   end
+   local dst, filename, depth, tensortype
+   if torch.isTensor(args[1]) then
+      dst = args[1]
+      filename = args[2]
+      depth = args[3]
+   else
+      filename = args[1]
+      depth = args[2]
+      tensortype = args[3]
+   end
+   return dst, filename, depth, tensortype
+end
+
+local function parseDecompressArg(...)
+   local args = {...}
+   if #args == 4 then
+      error("You cannot specify both dst and tensortype")
+   end
+   local dst, tensor, depth, tensortype
+   if torch.isTensor(args[2]) then
+      dst = args[1]
+      tensor = args[2]
+      depth = args[3]
+   else
+      tensor = args[1]
+      depth = args[2]
+      tensortype = args[3]
+   end
+   return dst, tensor, depth, tensortype
+end
+
 local function isPNG(magicTensor)
     local pngMagic = torch.ByteTensor({0x89,0x50,0x4e,0x47})
     return torch.all(torch.eq(magicTensor, pngMagic))
@@ -110,7 +159,14 @@ local function isJPG(magicTensor)
     return torch.all(torch.eq(magicTensor, jpgMagic))
 end
 
-local function decompress(tensor, depth, tensortype)
+local function decompress(...)
+    local args = {...}
+    local tensor
+    if torch.isTensor(args[2]) then
+      tensor = args[2]
+    else
+      tensor = args[1]
+    end
     if torch.typename(tensor) ~= 'torch.ByteTensor' then
         dok.error('Input tensor must be a byte tensor',
                   'image.decompress')
@@ -120,9 +176,9 @@ local function decompress(tensor, depth, tensortype)
                   'image.decompress')
     end
     if isJPG(tensor[{{1,3}}]) then
-        return image.decompressJPG(tensor, depth, tensortype)
+        return image.decompressJPG(...)
     elseif isPNG(tensor[{{1,4}}]) then
-        return image.decompressPNG(tensor, depth, tensortype)
+        return image.decompressPNG(...)
     else
         dok.error('Input must be either jpg or png format',
                   'image.decompress')
@@ -140,13 +196,21 @@ local function processPNG(img, depth, bit_depth, tensortype)
     return img
 end
 
-local function loadPNG(filename, depth, tensortype)
+local function loadPNG(...)
    if not xlua.require 'libpng' then
       dok.error('libpng package not found, please install libpng','image.loadPNG')
    end
+   local dst, filename, depth, tensortype = parseLoadArg(...)
+   local img = torch.isTensor(dst) and dst or template(tensortype)
+   tensortype = tensor2type(img)
    local load_from_file = 1
-   local a, bit_depth = template(tensortype).libpng.load(load_from_file, filename)
-   return processPNG(a, depth, bit_depth, tensortype)
+   local bit_depth = img.libpng.load(load_from_file, filename, img)
+   img = processPNG(img, depth, bit_depth, tensortype)
+   if dst and img:cdata() ~= dst:cdata() then
+      dst:resizeAs(img):copy(img)
+      return dst
+   end
+   return img
 end
 rawset(image, 'loadPNG', loadPNG)
 
@@ -169,22 +233,26 @@ local function savePNG(filename, tensor)
 end
 rawset(image, 'savePNG', savePNG)
 
-local function decompressPNG(tensor, depth, tensortype)
-    if not xlua.require 'libpng' then
-        dok.error('libpng package not found, please install libpng',
+local function decompressPNG(...)
+   if not xlua.require 'libpng' then
+      dok.error('libpng package not found, please install libpng',
                   'image.decompressPNG')
-    end
-    if torch.typename(tensor) ~= 'torch.ByteTensor' then
-        dok.error('Input tensor (with compressed png) must be a byte tensor',
+   end
+   local dst, tensor, depth, tensortype = parseDecompressArg(...) 
+   if torch.typename(tensor) ~= 'torch.ByteTensor' then
+      dok.error('Input tensor (with compressed png) must be a byte tensor',
                   'image.decompressPNG')
-    end
-    local load_from_file = 0
-    local a, bit_depth = template(tensortype).libpng.load(load_from_file, tensor)
-    if a == nil then
-        return nil
-    else
-        return processPNG(a, depth, bit_depth, tensortype)
-    end
+   end
+   local img = torch.isTensor(dst) and dst or template(tensortype)
+   local tensortype = tensor2type(img)
+   local load_from_file = 0
+   local bit_depth = img.libpng.load(load_from_file, tensor, img)
+   img = processPNG(img, depth, bit_depth, tensortype)
+   if dst and img:cdata() ~= dst:cdata() then
+      dst:resizeAs(img):copy(img)
+      return dst
+   end
+   return img
 end
 rawset(image, 'decompressPNG', decompressPNG)
 
@@ -204,36 +272,44 @@ local function processJPG(img, depth, tensortype)
    return img
 end
 
-local function loadJPG(filename, depth, tensortype)
+local function loadJPG(...)
    if not xlua.require 'libjpeg' then
       dok.error('libjpeg package not found, please install libjpeg','image.loadJPG')
    end
+   local dst, filename, depth, tensortype = parseLoadArg(...)
+   local img = torch.isTensor(dst) and dst or template(tensortype)
+   tensortype = tensor2type(img)
    local load_from_file = 1
-   local a = template(tensortype).libjpeg.load(load_from_file, filename)
-   if a == nil then
-      return nil
-   else
-      return processJPG(a, depth, tensortype)
+   img.libjpeg.load(load_from_file, filename, img)
+   img = processJPG(img, depth, tensortype)
+   if dst and img:cdata() ~= dst:cdata() then
+      dst:resizeAs(img):copy(img)
+      return dst
    end
+   return img
 end
 rawset(image, 'loadJPG', loadJPG)
 
-local function decompressJPG(tensor, depth, tensortype)
+local function decompressJPG(...)
    if not xlua.require 'libjpeg' then
       dok.error('libjpeg package not found, please install libjpeg',
         'image.decompressJPG')
    end
+   local dst, tensor, depth, tensortype = parseDecompressArg(...) 
    if torch.typename(tensor) ~= 'torch.ByteTensor' then
       dok.error('Input tensor (with compressed jpeg) must be a byte tensor',
         'image.decompressJPG')
    end
+   local img = torch.isTensor(dst) and dst or template(tensortype)
+   tensortype = tensor2type(img)
    local load_from_file = 0
-   local a = template(tensortype).libjpeg.load(load_from_file, tensor)
-   if a == nil then
-      return nil
-   else
-      return processJPG(a, depth, tensortype)
+   img.libjpeg.load(load_from_file, tensor, img)
+   img = processJPG(img, depth, tensortype)
+   if dst and img:cdata() ~= dst:cdata() then
+      dst:resizeAs(img):copy(img)
+      return dst
    end
+   return img
 end
 rawset(image, 'decompressJPG', decompressJPG)
 
@@ -276,15 +352,22 @@ function image.getJPGsize(filename)
    return torch.Tensor().libjpeg.size(filename)
 end
 
-local function loadPPM(filename, depth, tensortype)
+local function loadPPM(...)
    require 'libppm'
    local MAXVAL = 255
-   local a = template(tensortype).libppm.load(filename)
+   local dst, filename, depth, tensortype = parseLoadArg(...)
+   local img = torch.isTensor(dst) and dst or template(tensortype)
+   tensortype = tensor2type(img)
+   img.libppm.load(filename, img)
    if tensortype ~= 'byte' then
-      a:mul(1/MAXVAL)
+      img:mul(1/MAXVAL)
    end
-   a = todepth(a, depth)
-   return a
+   img = todepth(img, depth)
+   if dst and img:cdata() ~= dst:cdata() then
+      dst:resizeAs(img):copy(img)
+      return dst
+   end
+   return img
 end
 rawset(image, 'loadPPM', loadPPM)
 
@@ -329,19 +412,27 @@ local function is_supported(suffix)
 end
 rawset(image, 'is_supported', is_supported)
 
-local function load(filename, depth, tensortype)
-   if not filename then
+local function load(...)
+   local args = {...}
+   if #args == 0 or #args > 3 then
       print(dok.usage('image.load',
                        'loads an image into a torch.Tensor', nil,
+                       {type='tensor', help='tensor used to store the image'},
                        {type='string', help='path to file', req=true},
                        {type='number', help='force destination depth: 1 | 3'},
                        {type='string', help='type: byte | float | double'}))
       dok.error('missing file name', 'image.load')
    end
+   local filename
+   if type(args[1]) == 'string' then
+      filename = args[1]
+   else
+      filename = args[2]
+   end
    local ext = string.match(filename,'%.(%a+)$')
    local tensor
    if image.is_supported(ext) then
-      tensor = filetypes[ext].loader(filename, depth, tensortype)
+      tensor = filetypes[ext].loader(...)
    else
       dok.error('unknown image type: ' .. ext, 'image.load')
    end
@@ -523,10 +614,17 @@ local function scale(...)
    local dst,src,width,height,mode,size
    local args = {...}
    if select('#',...) == 4 then
-      src = args[1]
-      width = args[2]
-      height = args[3]
-      mode = args[4]
+      if type(args[3]) == 'string' then
+         dst = args[1]
+         src = args[2]
+         size = args[3]
+         mode = args[4]
+      else
+         src = args[1]
+         width = args[2]
+         height = args[3]
+         mode = args[4]
+      end
    elseif select('#',...) == 3 then
       if type(args[3]) == 'string' then
          if type(args[2]) == 'string' or type(args[2]) == 'number' then
@@ -534,9 +632,15 @@ local function scale(...)
             size = args[2]
             mode = args[3]
          else
-            dst = args[1]
-            src = args[2]
-            mode = args[3]
+            if args[3] == 'bilinear' or args[3] == 'bicubic' or args[3] == 'simple' then
+               dst = args[1]
+               src = args[2]
+               mode = args[3]
+            else
+               dst = args[1]
+               src = args[2]
+               size = args[3]
+            end
          end
       else
          src = args[1]
@@ -620,11 +724,22 @@ local function scale(...)
    if not dst and (not width or not height) then
       dok.error('could not find valid dest size', 'image.scale')
    end
-   if not dst then
-      if src:nDimension() == 3 then
-         dst = src.new(src:size(1), height, width)
+   if (width and height) then
+      if not dst then
+         if src:nDimension() == 3 then
+            dst = src.new(src:size(1), height, width)
+         else
+            dst = src.new(height, width)
+         end
       else
-         dst = src.new(height, width)
+         assert(torch.type(src)==torch.type(dst), 'src is a '..
+          torch.type(src)..' and dst is a '..torch.type(dst)..
+          ' they should be the same.')
+         if src:nDimension() == 3 then
+            dst:resize(src:size(1), height, width)
+         else
+            dst:resize(height, width)
+         end
       end
    end
    mode = mode or 'bilinear'
