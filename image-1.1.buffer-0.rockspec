@@ -1,9 +1,9 @@
 package = "image"
-version = "1.1.alpha-0"
+version = "1.1.buffer-0"
 
 source = {
-   url = "git://github.com/torch/image",
-   tag = "master"
+   url = "git://github.com/Moodstocks/image",
+   branch = "buffer"
 }
 
 description = {
@@ -12,7 +12,7 @@ description = {
 This package provides routines to load/save and manipulate images
 using Torch's Tensor data structure.
    ]],
-   homepage = "https://github.com/torch/image",
+   homepage = "https://github.com/Moodstocks/image/tree/buffer",
    license = "BSD"
 }
 
