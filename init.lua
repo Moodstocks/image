@@ -49,19 +49,27 @@ local magicPNG = string.char(0x89, 0x50, 0x4e, 0x47)
 require 'image.test'
 
 ----------------------------------------------------------------------
+-- soft loading of cuda
+--
+local use_cuda, _ = pcall(require, 'cutorch')
+
+----------------------------------------------------------------------
 -- types lookups
 --
 local type2tensor = {
-   float = torch.FloatTensor(),
-   double = torch.DoubleTensor(),
-   byte = torch.ByteTensor(),
+   float = torch.FloatTensor,
+   double = torch.DoubleTensor,
+   byte = torch.ByteTensor,
 }
-local template = function(type)
+if use_cuda then
+  type2tensor["cudaHost"] = cutorch.createCudaHostTensor
+end
+local template = function(type, ...)
    if type then
       assert(type2tensor[type], 'Provided type '..type..' is not supported.')
-      return type2tensor[type]
+      return type2tensor[type](...)
    else
-      return torch.Tensor()
+      return torch.Tensor(...)
    end
 end
 local tensor2type = function(tensor)
@@ -71,7 +79,23 @@ local tensor2type = function(tensor)
    elseif typename == 'torch.ByteTensor' then
       return 'byte'
    elseif typename == 'torch.FloatTensor' then
-      return 'float'
+      if not use_cuda then
+         return 'float'
+      else
+         -- The only way to differenciate a torch.FloatTensor from a CudaHost
+         -- tensor is the allocator they use.
+         if tensor:storage() then
+            local tensor_allocator = torch.pushudata(tensor:storage():cdata().allocator, 'torch.Allocator')
+            if tensor_allocator == cutorch.CudaHostAllocator then
+               return 'cudaHost'
+            else
+               return 'float'
+            end
+         else
+            -- CudaHost tensor always have a storage associated to them
+            return 'float'
+         end
+      end
    else
       error(typename .. ' is not a supported tensor type.')
    end
@@ -82,7 +106,7 @@ end
 --
 
 -- depth convertion helper
-local function todepth(img, depth)
+local function todepth(img, depth, tensortype)
    if depth and depth == 1 then
       if img:nDimension() == 2 then
          -- all good
@@ -98,7 +122,7 @@ local function todepth(img, depth)
       if chan == 3 then
          -- all good
       elseif img:nDimension() == 2 then
-         local imgrgb = img.new(3, img:size(1), img:size(2))
+         local imgrgb = template(tensortype, 3, img:size(1), img:size(2))
          imgrgb:select(1, 1):copy(img)
          imgrgb:select(1, 2):copy(img)
          imgrgb:select(1, 3):copy(img)
@@ -106,7 +130,7 @@ local function todepth(img, depth)
       elseif chan == 4 then
          img = img:narrow(1,1,3)
       elseif chan == 1 then
-         local imgrgb = img.new(3, img:size(2), img:size(3))
+         local imgrgb = template(tensortype, 3, img:size(2), img:size(3))
          imgrgb:select(1, 1):copy(img)
          imgrgb:select(1, 2):copy(img)
          imgrgb:select(1, 3):copy(img)
@@ -212,7 +236,7 @@ local function processPNG(img, depth, bit_depth, tensortype, noscale)
     if (not noscale) and tensortype ~= 'byte' then
         img:mul(1/MAXVAL)
     end
-    img = todepth(img, depth)
+    img = todepth(img, depth, tensortype)
     return img
 end
 
@@ -286,7 +310,7 @@ local function processJPG(img, depth, tensortype, noscale)
    if (not noscale) and tensortype ~= 'byte' then
       img:mul(1/MAXVAL)
    end
-   img = todepth(img, depth)
+   img = todepth(img, depth, tensortype)
    return img
 end
 
@@ -370,7 +394,7 @@ local function loadPPM(...)
    if (not noscale) and tensortype ~= 'byte' then
       img:mul(1/MAXVAL)
    end
-   img = todepth(img, depth)
+   img = todepth(img, depth, tensortype)
    if dst and img:cdata() ~= dst:cdata() then
       dst:resizeAs(img):copy(img)
       return dst
@@ -764,10 +788,11 @@ local function scale(...)
       if not dst then
          height = math.max(height, 1)
          width = math.max(width, 1)
+         local tensortype = tensor2type(src)
          if src:nDimension() == 3 then
-            dst = src.new(src:size(1), height, width)
+            dst = template(tensortype, src:size(1), height, width)
          else
-            dst = src.new(height, width)
+            dst = template(tensortype, height, width)
          end
       else
          assert(torch.type(src)==torch.type(dst), 'src is a '..
